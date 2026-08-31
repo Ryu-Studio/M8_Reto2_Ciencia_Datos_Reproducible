@@ -1,0 +1,794 @@
+\documentclass{article}
+
+\usepackage[spanish]{babel}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{hyperref}
+
+\geometry{
+a4paper,
+total={170mm, 257mm},
+left=20mm,
+top=20mm
+}
+
+\renewcommand{\tablename}{Tabla}
+\renewcommand{\figurename}{Figura}
+
+\title{Percepciones de las etapas de la vida en los países europeos de ESS9}
+\author{Maria Meritxell Ruiz Muñoz}
+\date{\Sexpr{Sys.Date()}}
+
+\begin{document}
+
+\maketitle
+
+<<setup, include=FALSE>>=
+knitr::opts_chunk$set(
+  echo = FALSE, 
+  warning = FALSE,
+  message = FALSE
+)
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(xtable)
+library(here)
+
+ruta_datos <- here::here(
+  "03_Datos",
+  "datos_procesados",
+  "datos_limpios.rds"
+)
+
+stopifnot(file.exists(ruta_datos))
+
+datos_limpios <- readRDS(ruta_datos)
+
+variables_necesarias <- c(
+  "admge",
+  "ageadlt", "agemage", "ageoage",
+  "gndr", "agea", "cntry",
+  "happy", "stflife", "plnftr"
+)
+
+# ----------------------------------------------------
+# Preparación de las fases de la vida
+# ----------------------------------------------------
+
+info_fases <- datos_limpios %>%
+  select(ageadlt, agemage, ageoage) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "variable",
+    values_to = "edad_percibida"
+  ) %>%
+  mutate(
+    fase = recode(
+      variable,
+      ageadlt = "Adultez",
+      agemage = "Mediana edad",
+      ageoage = "Vejez"
+    ),
+    fase = factor(
+      fase,
+      levels = c("Adultez",  "Mediana edad", "Vejez")
+    )
+  )
+
+# Edades numéricas válidas para los cálculos
+# 0 = "Depende" se conserva en fases, pero se excluye aquí 
+
+info_fases_edades <- info_fases %>%
+  filter(
+    !is.na(edad_percibida), 
+    edad_percibida > 0
+  )
+
+# Tabla resumen de las tres fases
+
+info_resumen_fases <- info_fases %>%
+  group_by(fase) %>%
+  summarise(
+    Mediana = median(
+      edad_percibida[!is.na(edad_percibida) & edad_percibida > 0]
+    ),
+    IQR = IQR(
+      edad_percibida[!is.na(edad_percibida) & edad_percibida > 0]
+    ),
+    n = sum(!is.na(edad_percibida) & edad_percibida > 0),
+    `Depende (%)` = round(
+      100 * sum(edad_percibida == 0, na.rm = TRUE) /
+        sum(!is.na(edad_percibida)),
+      1
+    ),
+    .groups = "drop"
+  )
+
+stopifnot(
+  all(variables_necesarias %in% names(datos_limpios)))
+@
+
+\section{Introducción y objetivo}
+
+El presente informe resume los principales resultados del análisis de las percepciones sobre el inicio de las etapas de la vida a partir de los datos de la European Social Survey Round 9 (ESS9). El conjunto de datos analizado contiene 
+\emph{\Sexpr{format(nrow(datos_limpios), big.mark = ".", decimal.mark = ",", scientific = FALSE)}}
+observaciones.
+
+\section{Datos y método}
+
+El análisis utiliza los datos de ESS9, recogidos en 2018/2019, y se centra en diez variables relacionadas con percepciones sobre el inicio de las etapas de la vida, características sociodemográficas y medidas de bienestar subjetivo y orientación al futuro.
+
+Los códigos especiales correspondientes a los valores perdidos se tratan como \texttt{NA} y no se realiza imputación. En las variables de inicio de la adultez, mediana edad y vejez el valor 0 corresponde a la respuesta ``Depende'' y se conserva como categoría válida, aunque se excluye de los cálculos que requieren una edad numérica. El análisis es exploratorio y no permite establecer relaciones causales. 
+
+El diseño \emph{split ballot}, recogido mediante \texttt{admge}, debe tenerse en cuenta especialmente al interpretar los resultados relativos al inicio de la adultez. 
+
+\section{Resultados}
+
+\subsection{Percepción y consenso}
+
+La Tabla~\ref{tab:resumen_fases} resume los principales indicadores descriptivos de las tres etapas vitales. 
+
+<<tabla_resumen, results='asis', echo=FALSE>>=
+tabla_info <- xtable(
+  info_resumen_fases,
+  label = "tab:resumen_fases"
+)
+
+print(
+  tabla_info,
+  include.rownames = FALSE,
+  floating = TRUE,
+  table.placement = "h!"
+)
+@
+
+Las medianas sitúan el inicio percibido de la adultez entorno a los
+\emph{\Sexpr{info_resumen_fases$Mediana[info_resumen_fases$fase == "Adultez"]}} años,
+de la mediana de edad en
+\emph{\Sexpr{info_resumen_fases$Mediana[info_resumen_fases$fase == "Mediana edad"]}} años,
+y de la vejez en
+\emph{\Sexpr{info_resumen_fases$Mediana[info_resumen_fases$fase == "Vejez"]}} años.
+
+\subsubsection*{Distribución de las edades percibidas}
+
+La Figura~\ref{fig:figura_fases} muestra la distribución de las edades 
+percibidas de inicio de cada etapa vital. Para representar únicamente edades,
+la respuesta ``Depende'' (valor 0) se excluye del gráfico de violín y se muestra 
+separadamente como porentaje.
+
+<<violin_fases, echo=FALSE>>=
+
+info_fases_plot <- info_fases %>%
+  filter(!is.na(edad_percibida),
+         edad_percibida >= 1,
+          edad_percibida <= 100
+         )
+
+
+info_resumen_grafico <- info_fases_plot %>%
+  group_by(fase) %>%
+  summarise(
+    q1 = quantile(edad_percibida, 
+                  probs = 0.25,
+                  na.rm = TRUE), 
+    mediana = median(edad_percibida, 
+                     na.rm = TRUE), 
+    q3 = quantile(edad_percibida, 
+                  probs = 0.75,
+                  na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    info_resumen_fases %>%
+      select(fase, `Depende (%)`),
+    by = "fase"
+  )
+    
+
+info_grafico_fases <- ggplot(
+  info_fases_plot,
+  aes(x = edad_percibida, y = fase)
+) +
+  geom_violin(
+    fill = "grey85",
+    color = "grey45",
+    linewidth = 0.4,
+    scale = "width",
+    trim = FALSE
+  ) +
+  geom_segment(
+    data = info_resumen_grafico,
+    aes(
+      x = q1,
+      xend = q3,
+      y = fase,
+      yend = fase
+    ),
+    inherit.aes = FALSE,
+    linewidth = 2,
+    lineend = "round"
+  ) +
+  geom_point(
+    data = info_resumen_grafico,
+    aes(x = mediana, y = fase),
+    inherit.aes = FALSE,
+    size = 3
+  ) +
+  geom_text(
+    data = info_resumen_grafico,
+    aes(
+      x = mediana,
+      y = fase,
+      label = paste0(mediana, " años")
+    ),
+    inherit.aes = FALSE,
+    vjust = -2.65,
+    size = 3.75,
+    fontface = "bold",
+    colour = "black"
+  ) +
+  geom_vline(
+    xintercept = 103,
+    color = "grey75",
+    linewidth = 0.4
+  ) +
+  geom_text(
+     data = info_resumen_grafico,
+    aes(
+      x = 108,
+      y = fase,
+      label = paste0(
+        round(`Depende (%)`, 1),
+        " %"
+        )
+    ),
+    inherit.aes = FALSE,
+    hjust = 0,
+    size = 3
+  ) +
+  annotate(
+    "text",
+    x = 108,
+    y = 3.18,
+    label = 'Respuesta\n"Depende"',
+    hjust = 0,
+    vjust = 0,
+    size = 3.1,
+    fontface = "bold"
+  ) +
+  scale_x_continuous(
+    breaks = seq(0, 100, by = 20),
+    limits = c(0, 122),
+    expand = expansion(mult = c(0, 0))
+  ) +
+  labs(
+    x = "Edad considerada como inicio de la etapa (años)",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    
+    axis.text.y = element_text(
+      size = 9
+    ),
+    
+    axis.title.x = element_text(
+      margin = margin(t = 10)
+    ),
+    plot.margin = margin(
+      t = 10,
+      r = 15,
+      b = 10,
+      l = 10
+    )
+  )
+@
+
+<<codigo_grafico_fases, eval=FALSE, echo=TRUE>>=
+
+#------------------------------------------------------------
+# Cálculo de los indicadores representados en el gráfico
+# Mediana e intervalo intercuartílico (Q1-Q3)
+# -----------------------------------------------------------
+
+info_resumen_grafico <- info_fases_plot %>%
+  group_by(fase) %>%
+  summarise(
+    q1 = quantile(edad_percibida, 
+                  probs = 0.25,
+                  na.rm = TRUE), 
+    mediana = median(edad_percibida, 
+                     na.rm = TRUE), 
+    q3 = quantile(edad_percibida, 
+                  probs = 0.75,
+                  na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(
+    info_resumen_fases %>%
+      select(fase, `Depende (%)`),
+    by = "fase"
+  )
+@
+
+<<figura_fases, echo=FALSE, fig.width=7, fig.height=3.2, fig.cap='Distribución de las edades percibidas de inicio de las etapas vitales', fig.pos='h!', out.width='0.90\\linewidth' >>=
+
+info_grafico_fases            
+@
+
+En conjunto, los resultados muestran una ordenación clara de las tres etapas vitales, aunque las distribuciones evidencian variabilidad en las edades atribuidas a su inicio. Por tanto, las medianas resumen puntos de referencia compartidos, pero no deben interpretarse como fronteras rígidas. 
+
+\subsection{Diferencias sociodemográficas}
+
+\subsubsection{Sexo}
+
+Para examaninar las diferencias según sexo se comparan las edades percibidas de inicio de cada fase mediante pruebas de Wilcoxon.
+
+<<sexo, echo=TRUE>>=
+
+# Comparación de las edades percibidas según sexo 
+
+p_sexo <- sapply(c("ageadlt", "agemage", "ageoage"), function(v) {
+  x <- datos_limpios[[v]]
+  wilcox.test(x[x != 0] ~ datos_limpios$gndr[x != 0])$p.value
+})
+@
+
+Se observan diferencias estadísticamente significativas según el sexo en las edades percibidas de incio de las tres etapas vitales ($p < 0{,}001$). No obstante, su pequeña magnitud aconseja interpretar estas diferencias con cautela e indica que, aunque el sexo introduce diferencias en estas percepciones, su relevancia sustantiva es limitada. 
+
+
+\subsubsection{Edad del entrevistado}
+
+Para explorar si las percepciones sobre el inicio de las etapas vitales varían con la propia edad, se calcula la edad percibida media para cada edad del entrevistado.
+
+<<edad_info, echo=FALSE>>=
+
+info_edad <- datos_limpios %>%
+  
+  select(agea, ageadlt, agemage, ageoage) %>%
+  
+  pivot_longer(
+    cols = c(ageadlt, agemage, ageoage),
+    names_to = "variable_fase",
+    values_to = "edad_percibida"
+  ) %>%
+  
+  mutate(
+    fase = case_when(
+      variable_fase == "ageadlt" ~ "Adultez",
+      variable_fase == "agemage" ~ "Mediana edad",
+      variable_fase == "ageoage" ~ "Vejez"
+    ),
+    
+    fase = factor(
+      fase,
+      levels = c("Adultez", "Mediana edad", "Vejez")
+    )
+  ) %>%
+  
+  filter(
+    !is.na(agea),
+    !is.na(edad_percibida),
+    edad_percibida > 0
+  )
+@
+
+<<edad_resumen, echo=TRUE>>=
+
+# Media de la edad percibida para cada edad del entrevistado 
+
+info_resumen_edad <- info_edad %>%
+  group_by(fase, agea) %>%
+  summarise(
+    media = mean(edad_percibida, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  )
+@
+
+<<edad_grafico, echo=FALSE>>=
+
+info_grafico_edad <- ggplot(
+  info_resumen_edad,
+  aes(
+    x = agea, 
+    y = media,
+    group = fase
+  )
+) +
+  
+  geom_line(
+    linewidth = 0.7, 
+    colour = "black"
+  ) +
+  
+  facet_wrap(
+    ~ fase, 
+    ncol = 1, 
+    scales = "free_y"
+  ) +
+  
+  scale_x_continuous(
+    breaks = seq(20, 90, by = 10)
+  ) +
+  
+  labs(
+    x = "Edad del entrevistado (años)",
+    y = "Inicio percibido de las fases (media, años)"
+  ) +
+  
+    theme_minimal(base_size = 11) +
+  
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank(),
+      panel.grid.major.x = element_line(
+        linewidth = 0.3,
+        colour = "grey85"
+      ),
+      strip.text = element_text(
+        face = "bold",
+        size = 10
+      ),
+      
+      strip.background = element_blank(),
+      
+      axis.text = element_text(
+        size = 9
+      ),
+      
+      axis.title.x = element_text(
+        margin = margin(t = 10) 
+      ),
+      
+      axis.title.y = element_text(
+        margin = margin(r = 10)
+      ),
+      
+      plot.margin = margin(
+        t = 10, 
+        r = 10
+     )
+  )
+@
+
+<<figura_agea, echo=FALSE, fig.width=7, fig.height=4.5, fig.cap='Edad percibida de incio de las etapas vitales según la edad del entrevistado', fig.pos='h!', out.width='0.90\\linewidth' >>=
+
+info_grafico_edad
+@
+
+La edad del entrevistado se relaciona con las edades atribuidas al inicio de las etapas vitales. La tendencia es especialmente clara para la mediana edad y la vejez, cuyo inicio se sitúa progresivamente más tarde entre los entrevistados de mayor edad. En la adultez el patrón es menos lineal y debe interpretarse con mayor cautela por el efecto del diseño \emph{split ballot}.
+
+\subsubsection{País}
+
+Para explorar las diferencias territoriales se comparan las medianas de las edades percibidas de inicio de cada etapa entre países, teniendo en cuenta que los tamaños muestrales nacionales son desiguales.
+
+<<pais_info, echo=FALSE>>=
+
+info_pais <- datos_limpios %>%
+  
+  select(cntry, ageadlt, agemage, ageoage) %>%
+  
+  pivot_longer(
+    cols = c(ageadlt, agemage, ageoage),
+    names_to = "variable",
+    values_to = "edad_percibida"
+  ) %>%
+  
+  mutate(
+    fase = recode(
+      variable,
+      ageadlt = "Adultez",
+      agemage = "Mediana edad",
+      ageoage = "Vejez"
+    ),
+    
+    fase = factor(
+      fase,
+      levels = c("Adultez", "Mediana edad", "Vejez")
+    )
+  ) %>%
+  
+  filter(
+    !is.na(cntry),
+    !is.na(edad_percibida),
+    edad_percibida != 0
+  )
+@
+
+<<pais_resumen, echo=TRUE>>=
+
+# Mediana y tamaño muestral por país y fase 
+
+info_resumen_pais <- info_pais %>%
+    group_by(fase, cntry) %>%
+  summarise(
+    mediana = median(edad_percibida, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  )
+
+# Rango de las medianas nacionales por fase 
+
+info_rango_pais <- info_resumen_pais %>%
+    summarise(
+      adultez_min = min(mediana[fase == "Adultez"], na.rm = TRUE),
+      adultez_max = max(mediana[fase == "Adultez"], na.rm = TRUE),
+      mediana_edad_min = min(mediana[fase == "Mediana edad"], na.rm = TRUE),
+      mediana_edad_max = max(mediana[fase == "Mediana edad"], na.rm = TRUE),
+      vejez_min = min(mediana[fase == "Vejez"], na.rm = TRUE),
+      vejez_max = max(mediana[fase == "Vejez"], na.rm = TRUE)
+  ) 
+@
+
+Las medianas nacionales varían entre 
+\Sexpr{info_rango_pais$adultez_min} y 
+\Sexpr{info_rango_pais$adultez_max} años
+para el inicio de la adultez, entre
+\Sexpr{info_rango_pais$mediana_edad_min} y
+\Sexpr{info_rango_pais$mediana_edad_max}
+para el inicio de la mediana edad, entre
+\Sexpr{info_rango_pais$vejez_min} y
+\Sexpr{info_rango_pais$vejez_max}
+para el inicio de la vejez. Estas diferencias muestran que los puntos de referencia sobre el incio de las etapas vitales no son completamente homogéneos entre países. Dado que los tamaños muestrales son desiguales, los resultados deben interpretarse de forma descriptiva y con cautela.  
+
+\subsection{Relación con el bienestar subjetivo y la orientación al futuro}
+
+<<relaciones_fases, echo=FALSE>>=
+
+relaciones_fases <- datos_limpios %>%
+  summarise(
+    felicidad_adultez = cor(ageadlt[ageadlt != 0], happy[ageadlt != 0], method = "spearman",
+                        use = "complete.obs"),
+    felicidad_mediana_edad = cor(agemage[agemage != 0], happy[agemage != 0], method = "spearman",
+                        use = "complete.obs"),
+    felicidad_vejez = cor(ageoage[ageoage != 0], happy[ageoage != 0], method = "spearman",
+                        use = "complete.obs"),
+    
+    satisfaccion_adultez = cor(ageadlt[ageadlt != 0], stflife[ageadlt != 0], method = "spearman",
+                        use = "complete.obs"),
+    satisfaccion_mediana_edad = cor(agemage[agemage != 0], stflife[agemage != 0], method = "spearman",
+                        use = "complete.obs"),
+    satisfaccion_vejez = cor(ageoage[ageoage != 0], stflife[ageoage != 0], method = "spearman",
+                        use = "complete.obs"),
+    
+    planificacion_adultez = cor(ageadlt[ageadlt != 0], plnftr[ageadlt != 0], method = "spearman",
+                        use = "complete.obs"),
+    planificacion_mediana_edad = cor(agemage[agemage != 0], plnftr[agemage != 0], method = "spearman",
+                        use = "complete.obs"),
+    planificacion_vejez = cor(ageoage[ageoage != 0], plnftr[ageoage != 0], method = "spearman",
+                        use = "complete.obs"),
+  )
+@
+
+\subsubsection{Felicidad y satisfacción con la vida}
+
+La relación entre la edad percibida de incio de las etapas vitales y el bienestar subjetivo es, en general, muy débil. Para felicidad, las correlaciones de Spearman son $\rho = \Sexpr{round(relaciones_fases$felicidad_adultez, 2)}$ en la adultez $\rho = \Sexpr{round(relaciones_fases$felicidad_mediana_edad, 4)}$ en la mediana edad y $\rho = \Sexpr{round(relaciones_fases$felicidad_vejez, 2)}$ en la vejez. Para la satisfacción con la vida se observa un patrón similar, con $\rho = \Sexpr{round(relaciones_fases$satisfaccion_adultez, 2)}$, $\rho = \Sexpr{round(relaciones_fases$satisfaccion_mediana_edad, 2)}$, $\rho = \Sexpr{round(relaciones_fases$satisfaccion_vejez, 2)}$, respectivamente. En conjunto, las asociaciones son de magnitud muy reducida. En ambas variables se observa el mismo patrón: una asociación ligeramente inversa en la adultez y positiva y prácticamente nula en la mediana edad y la vejez.  
+
+\subsubsection{Planificación del futuro}
+
+La relación entre la edad percibida de incio de las etapas vitales y la planificación hacia el futuro también es muy débil. Las correlaciones de Spearman son $\rho = \Sexpr{round(relaciones_fases$planificacion_adultez, 2)}$ en la adultez $\rho = \Sexpr{round(relaciones_fases$planificacion_mediana_edad, 4)}$ en la mediana edad y $\rho = \Sexpr{round(relaciones_fases$planificacion_vejez, 2)}$ en la vejez. Se reproduce así el patrón observado para el bienestar subjetivo: una asociación inversa en la adultez y prácticamente nula en las demás etapas.   
+
+\subsection{Síntesis de los principales resultados}
+
+<<tabla_sintesis, echo=FALSE, results='asis'>>=
+
+fases <- c(
+  ageadlt = "Adultez",
+  agemage = "Mediana edad",
+  ageoage = "Vejez"
+)
+
+# Funciones auxiliares
+
+fmt_num <- function(x, digits = 2){
+  formatC(x, format = "f", digits = digits, decimal.mark = ",")
+}
+
+fmt_rho <- function(x) {
+  fmt_num(x, 2)
+}  
+
+interpretar_rho <- function(r) {
+  a <- abs(r)
+  if (a < .10) "prácticamente nula"
+  else if (a < .30) "asociación débil"
+  else if (a < .50) "asociación moderada"
+  else "asociación fuerte"
+}
+
+fase_sin_depende <- function(x) {
+  x[x == 0] <- NA
+  x
+}
+  
+# Relaciones entre fases
+
+rho_adlt_mage <- cor(
+  fase_sin_depende(datos_limpios$ageadlt),
+  fase_sin_depende(datos_limpios$agemage),
+  method = "spearman", use = "pairwise.complete.obs"
+)
+
+rho_adlt_oage <- cor(
+  fase_sin_depende(datos_limpios$ageadlt),
+  fase_sin_depende(datos_limpios$ageoage),
+  method = "spearman", use = "pairwise.complete.obs"
+)
+
+rho_mage_oage <- cor(
+  fase_sin_depende(datos_limpios$agemage),
+  fase_sin_depende(datos_limpios$ageoage),
+  method = "spearman", use = "pairwise.complete.obs"
+)
+
+# Edad del entrevistado y fases
+
+rho_agea <- sapply(names(fases), function(v) {
+  cor(
+    datos_limpios$agea,
+    fase_sin_depende(datos_limpios[[v]]),
+    method = "spearman", use = "pairwise.complete.obs"
+  )
+})
+
+# Sexo y fases
+
+p_gndr <- sapply(names(fases), function(v){
+  d <- datos_limpios %>%
+    transmute(
+      gndr = gndr,
+      fase = fase_sin_depende(.data[[v]])
+    ) %>%
+    filter(!is.na(gndr), !is.na(fase))
+  
+  wilcox.test(fase~gndr, data = d, exact = FALSE)$p.value
+})
+
+# País y fases
+
+p_cntry <- sapply(names(fases), function(v){
+  d <- datos_limpios %>%
+    transmute(
+      cntry = cntry,
+      fase = fase_sin_depende(.data[[v]])
+    ) %>%
+    filter(!is.na(cntry), !is.na(fase))
+  
+  kruskal.test(fase~cntry, data = d)$p.value
+})
+
+# Fases con planificación y bienestar
+
+rho_fases_exp <- unlist(
+  lapply(names(fases), function(f) {
+    sapply(c("plnftr", "happy", "stflife"), function(v){ 
+      cor(
+        fase_sin_depende(datos_limpios[[f]]),
+        datos_limpios[[v]],
+        method = "spearman", use = "pairwise.complete.obs"
+      )
+      })
+  })
+)
+
+rho_fases_exp_max <- max(
+  abs(rho_fases_exp),
+  na.rm = TRUE
+)
+
+# Resultados resumidos de los contrastes 
+
+resultado_gndr <- if(all(p_gndr < .001, na.rm = TRUE)) {
+  "p < 0,001 en las tres fases"
+} else {
+  paste0(
+    "p entre ",
+    fmt_num(min(p_gndr, na.rm = TRUE), 3),
+    " y ",
+    fmt_num(max(p_gndr, na.rm = TRUE), 3)
+  )
+}
+
+resultado_cntry <- if(all(p_cntry < .001, na.rm = TRUE)) {
+  "p < 0,001 en las tres fases"
+} else {
+  paste0(
+    "p entre ",
+    fmt_num(min(p_cntry, na.rm = TRUE), 3),
+    " y ",
+    fmt_num(max(p_cntry, na.rm = TRUE), 3)
+  )
+}
+
+# Tabla síntesis 
+
+tabla_relaciones <- data.frame(
+  Variables = c(
+    "ageadlt -- agemage",
+    "ageadlt -- ageoage",
+    "agemage -- ageoage",
+    "gndr -- fases",
+    "agea -- ageadlt",
+    "agea -- agemage",
+    "agea -- ageoage",
+    "cntry -- fases",
+    "fases -- plnftr / happy / stflife"
+  ),
+  
+  Analisis = c(
+    "Spearman",
+    "Spearman",
+    "Spearman",
+    "Wilcoxon",
+    "Spearman",
+    "Spearman",
+    "Spearman",
+    "Kruskal-Wallis",
+    "Spearman"
+  ),
+  
+  Resultado = c(
+    paste0("rho = ", fmt_rho(rho_adlt_mage),"; ", interpretar_rho(rho_adlt_mage)),
+    paste0("rho = ", fmt_rho(rho_adlt_oage),"; ", interpretar_rho(rho_adlt_oage)),
+    paste0("rho = ", fmt_rho(rho_mage_oage),"; ", interpretar_rho(rho_mage_oage)),
+    resultado_gndr,
+    
+    paste0("rho = ", fmt_rho(rho_agea["ageadlt"]),"; ", interpretar_rho(rho_agea["ageadlt"])),
+    paste0("rho = ", fmt_rho(rho_agea["agemage"]), "; ", interpretar_rho(rho_agea["agemage"])),
+    paste0("rho = ", fmt_rho(rho_agea["ageoage"]), "; ", interpretar_rho(rho_agea["ageoage"])),
+    
+    resultado_cntry,
+    
+    paste0(
+      "|rho| <=",
+      fmt_rho(rho_fases_exp_max),
+      ";asociación ",
+      interpretar_rho(rho_fases_exp_max)
+    )
+  ),
+  
+  check.names = FALSE
+)
+
+# Salida de la tabla 
+
+cat("\\begin{figure}[h!]\n")
+cat("\\centering\n")
+
+print(
+  xtable(
+    tabla_relaciones,
+    align = c("l", "p{4cm}", "p{2.5cm}", "p{8cm}")
+  ),
+  
+  include.rownames = FALSE,
+  sanitize.text.function = identity,
+  floating = FALSE
+)
+
+cat("\\caption{Síntesis de las principales relaciones exploradas}\n")
+cat("\\end{figure}\n")
+@
+
+\section{Fuentes}
+
+\begin{enumerate}
+
+\item Billiari FC, Badolato L, Hagestad GO, Liefbroer AC, Settersten RA Jr, Spéder Z, et al.
+\textit{The Timing of Life: Topline results from Round 9 of the European Social Survey. ESS Topline Results Series. Issue 11. European Social Survey ERIC; 2021.} 
+
+\href{https://www.europeansocialsurvey.org/sites/default/files/2023-06/TL11_Timing_of_Life-English.pdf}{Documento}
+
+\item European Social Survey ERIC. 
+\textit{ESS Round 9: European Social Survey Round 9 Data. Edition 3.3. Bergen Sikt – Norwegian Agency for Shared Services in Education and Research; 2024. }
+
+\href{https://doi.org/10.21338/ess9e03_3}{Datos}
+
+\end{enumerate}
+
+\end{document}

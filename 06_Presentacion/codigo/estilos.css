@@ -1,0 +1,12 @@
+slides > slide.title-slide hgroup {
+  left: 60px !important;
+}
+
+h1 {
+  color: #285F7D !important;
+}
+
+slides > slide {
+  font-size: 24px;
+}
+

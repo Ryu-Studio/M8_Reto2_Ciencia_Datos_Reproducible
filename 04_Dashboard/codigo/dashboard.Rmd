@@ -1,0 +1,1787 @@
+---
+title: "Percepciones de las etapas de la vida en los países europeos de ESS9"
+subtitle: "ESS9 - Timing of Life"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+# ============================================================
+# PROYECTO: Percepciones de las etapas de la vida en Europa 
+#           (European Social Survey, Round 9)
+#
+# SCRIPT: Dashboard interactivo 
+#
+# OBJETIVO: 
+# Construir un dashboard interactivo para visualizar las 
+# percepciones sobre el incio de las etapas de la vida, 
+# sus diferencias sociodemográficas y su relación con
+# el binestar subjetivo y la planificación del futuro. 
+#
+# FUENTE:
+# European Social Survey (ESS), Round 9 
+# Integrated File, Edition 3.3
+# DOI: https://doi.org/10.21338/ess9e03_3
+#
+# Autora: Maria Meritxell Ruiz Muñoz 
+# ============================================================
+
+```
+
+```{r paquetes, message=FALSE, warning=FALSE}
+# ------------------------------------------------------------
+# 1. Preparar el entorno de trabajo 
+# ------------------------------------------------------------
+
+# Paquetes necesarios para la preparación de datos,
+# visualización e interactividad del dashboard 
+
+paquetes <- c(
+  "dplyr",
+  "tidyr",
+  "plotly",
+  "flexdashboard",
+  "here",
+  "haven",
+  "maps",
+  "knitr"
+)
+
+invisible(
+  lapply(paquetes, library, character.only = TRUE)
+)
+
+```
+
+```{r cargar-datos}
+# ------------------------------------------------------------
+# 2. Cargar los datos procesados 
+# ------------------------------------------------------------
+
+# Se utiliza el conjunto de datos generado por el script
+# de depuración, evitando repetir el procesamiento en el dashboard.
+
+ruta_datos <- here::here(
+  "03_Datos",
+  "datos_procesados",
+  "datos_limpios.rds"
+)
+
+stopifnot(file.exists(ruta_datos))
+
+datos_limpios <- readRDS(ruta_datos)
+
+# Comprobar que el archivo contiene las variables necesarias
+# para construir el dashboard 
+
+variables_dashboard <- c(
+  "admge",
+  "ageadlt", "agemage", "ageoage",
+  "gndr", "agea", "cntry",
+  "happy", "stflife", "plnftr"
+)
+
+stopifnot(
+  all(variables_dashboard %in% names(datos_limpios))
+)
+
+```
+
+```{r contexto-datos, echo=FALSE}
+# ============================================================
+# CONTEXTO
+# Preparación de los datos
+# Percepción del inicio de las etapas de la vida 
+# ============================================================
+
+# ------------------------------------------------------------
+# 1. Pasar las tres variables de fases a formato largo 
+# ------------------------------------------------------------
+
+# 0 = "Depende" es una respuesta válida, pero no representa
+# una edad. Se conserva inicialmente y después se separa
+# de las respeustas expresadas en años. 
+
+bloque1_fases <- datos_limpios %>%
+  select(
+    ageadlt,
+    agemage,
+    ageoage
+  )  %>%
+  pivot_longer(
+    cols = c(
+      ageadlt,
+    agemage,
+    ageoage
+    ),
+    names_to = "variable",
+    values_to = "edad"
+  ) %>%
+  mutate(
+    fase = case_when(
+      variable == "ageadlt" ~ "Adultez",
+      variable == "agemage" ~ "Mediana edad",
+      variable == "ageoage" ~ "Vejez"
+    ),
+    fase = factor(
+      fase,
+      levels = c(
+        "Adultez",
+        "Mediana edad",
+        "Vejez"
+      )
+    )
+  )
+
+# ------------------------------------------------------------
+# 2. Edades percibidas
+# ------------------------------------------------------------
+
+# Para el violín se utilizan exclusivamente las respuestas
+# expresadas como una edad correcta
+# 0 = "Depende" se excluye porque no pertenece a la escala
+# cuantitativa de edad.
+
+bloque1_edades <- bloque1_fases %>%
+  filter(
+    !is.na(edad),
+    edad >= 1,
+    edad <= 100
+  )
+
+# ------------------------------------------------------------
+# 3. Mediana e intervalo intercuartílico 
+# ------------------------------------------------------------
+
+bloque1_resumen <- bloque1_edades %>%
+  group_by(fase) %>%
+  summarise(
+    n = n(),
+    q1 = quantile(
+      edad,
+      probs = 0.25,
+      na.rm = TRUE
+    ),
+    mediana = median(
+      edad, 
+      na.rm = TRUE
+    ),
+    q3 = quantile(
+      edad,
+      probs = 0.75,
+      na.rm = TRUE
+    ),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    tooltip_mediana = paste0(
+      "<b>", fase, "<b>",
+      "<br>Mediana: ", mediana, " años",
+      "<br>IQR: ", q1, "_", q3, " años",
+      "<br>n: ", format(n, big.mark = ".", decimal.mark = ",", scientific = FALSE)
+    )
+  )
+
+# ------------------------------------------------------------
+# 4. Respuesta "Depende"
+# ------------------------------------------------------------
+
+# El porcentaje se calcula sobre las respuestas válidas:
+# edad concreta (0-100) o "Depende" (0).
+# Los NA no forman parte del denominador. 
+
+bloque1_depende <- bloque1_fases %>%
+  filter(
+    !is.na(edad),
+    edad >= 0,
+    edad <= 100
+  ) %>%
+  group_by(fase) %>%
+  summarise(
+    n_validas = n(),
+    n_depende = sum(edad == 0),
+    porcentaje_depende = 
+      100 * n_depende / n_validas,
+    .groups = "drop"
+  ) %>%
+  mutate(
+    etiqueta_depende = paste0(
+      format(
+        round(porcentaje_depende, 1),
+        decimal.mark = ",",
+        nsmall = 1
+      ),
+    "%"
+  ),
+tooltip_depende = paste0(
+  "<b>", fase, "</b>",
+  "<br>Respuesta \"Depende\": ",
+  format(
+    round(porcentaje_depende, 1),
+        decimal.mark = ","),
+        nsmall = 1
+  ),
+  "%",
+"<br>n: ", format(n_depende, big.mark = ".", scientific = FALSE),
+"<br>Respuestas válidas: ",
+format(n_validas, big.mark = ".", scientific = FALSE)
+ )
+```
+
+Contexto
+=====================================
+
+```{r contexto-grafico, echo=FALSE}
+
+# ============================================================
+# CONTEXTO
+# Gráfico principal
+# Violín + mediana +IQR + respuesta "Depende"
+# ============================================================
+
+  grafico_violin <- plot_ly()
+  
+# Violines  
+  
+  for (fase_i in levels(bloque1_edades$fase)) {
+    datos_i <- bloque1_edades %>%
+      filter(fase == fase_i)
+    
+    grafico_violin <- grafico_violin %>%
+      add_trace(
+        data = datos_i, 
+        x = ~edad,
+        y = ~fase,
+        type = "violin",
+        orientation = "h",
+        name = fase_i,
+        scalegroup = "fases",
+        scalemode = "width",
+        spanmode = "hard",
+        side = "both",
+        points = FALSE,
+        fillcolor = "rgba(217, 217, 217, 0.85)",
+        line = list(
+          color = "rgb(115, 115, 115)",
+          width = 1 
+        ),
+        hoverinfo = "skip",
+        showlegend = FALSE
+      ) 
+  }
+  
+# Intervalo Intercuartílico (IQR)
+
+  for (i in seq_len(nrow(bloque1_resumen))) {
+    
+    grafico_violin <- grafico_violin %>%
+      add_segments(
+        x = bloque1_resumen$q1[i],
+        xend = bloque1_resumen$q3[i],
+        y = bloque1_resumen$fase[i],
+        yend = bloque1_resumen$fase[i],
+        line = list(
+          color = "black",
+          width = 7
+        ),
+        hoverinfo = "skip",
+        showlegend = FALSE
+      )
+  }
+  
+# Mediana interactiva
+  
+  grafico_violin <- grafico_violin %>%
+    add_markers(
+      data = bloque1_resumen,
+      x = ~mediana,
+      y = ~fase,
+      marker = list(
+        color = "black",
+        size = 11
+      ),
+      text = ~tooltip_mediana,
+      hovertemplate = "%{text}<extra></extra>",
+      showlegend = FALSE
+    )
+  
+# Etiqueta visible de la mediana
+  
+  grafico_violin <- grafico_violin %>%
+    add_annotations(
+      data = bloque1_resumen,
+      x = ~mediana,
+      y = ~fase,
+      text = ~paste0("<b>", mediana, " años</b>"),
+      showarrow = FALSE,
+      xanchor = "center",
+      yanchor = "bottom",
+      yshift = 8,
+      textfont = list(
+        size = 12, 
+        color = "black"
+      ),
+      hoverinfo = "skip",
+      showlegend = FALSE
+    )
+  
+# Porcentaje de respuesta "Depende"
+  
+  grafico_violin <- grafico_violin %>%
+    add_text(
+      data = bloque1_depende,
+      x = rep(111, nrow(bloque1_depende)),
+      y = ~fase,
+      text = ~etiqueta_depende,
+      textfont = list(
+        size = 13,
+        color = "black"
+      ),
+      hoverinfo = "skip",
+      showlegend = FALSE
+    )
+
+# Layout
+  
+  grafico_violin <- grafico_violin %>%
+    layout(
+      autosize = TRUE,
+      yaxis = list(
+        title = "",
+        domain = c(0.05, 0.93),
+        categoryorder = "array",
+        categoryarray = c(
+          "Vejez",
+          "Mediana edad",
+          "Adultez"
+        ),
+        tickmode = "array",
+        tickvals = c(
+          "Vejez",
+          "Mediana edad",
+          "Adultez"
+        ),
+        ticktext = c(
+          "Vejez",
+          "Mediana<br>edad",
+          "Adultez"
+        ),
+        tickfont = list(
+          size = 13,
+          color = "black"
+        ),
+        showgrid = FALSE,
+        zeroline = FALSE,
+        automargin = TRUE
+      ),
+      xaxis = list(
+        title = list(
+          text = "Edad considerada como inicio de la etapa (años)",
+          font = list(size = 13)
+        ),
+        range = c(0, 122), 
+        tickmode = "array", 
+        tickvals = seq(0, 100, by = 10),
+        ticktext = as.character(seq(0, 100, by = 10)),
+        tickfont = list(size = 12),
+        showgrid = TRUE,
+        zeroline = FALSE,
+        fixedrange = FALSE
+      ),
+      
+# separación visual de la zona "Depende"
+
+      shapes = list(
+       list(
+         type = "line",
+         x0 = 103, 
+         x1 = 103, 
+         xref = "x",
+         y0 = 0,
+         y1 = 1, 
+         yref = "paper",
+         line = list(
+           color = "rgb(170, 170, 170)",
+           width = 1
+         )
+       )
+     ),
+     
+     
+# Título y subtítulo
+
+     annotations = list(list(
+       x = 0, 
+       y = 1.18,
+       xref = "paper",
+       yref = "paper",
+       xanchor = "left",
+       yanchor = "top",
+       text = "<b>Percepciones sobre las fases de la vida: ¿dónde situamos sus fronteras y cuánto consenso existe?</b>",
+       showarrow = FALSE,
+       align = "left",
+       font = list(size = 16, color = "black")
+     ),
+
+       list(
+       x = 0, 
+       y = 1.09,
+       xref = "paper",
+       yref = "paper",
+       xanchor = "left",
+       yanchor = "top",
+       text = "<i>Distribución de las edades percibidas, mediana e intervalo intercuartílico</i>",
+       showarrow = FALSE,
+       align = "left",
+       font = list(size = 13, color = "rgb(70, 70, 70)")
+     ),
+
+# Cabecera de la zona "Depende"
+
+     list(
+       x = 111, 
+       y = 1.04, 
+       xref = "x",
+       yref = "paper",
+       text = 'Respuesta<br>"Depende"',
+       showarrow = FALSE, 
+       align = "center",
+       font = list(
+         size = 12, 
+         color = "black"
+       )
+     ),
+
+# Nota metodológica 
+
+     list(
+       x = 0, 
+       y = -0.18,
+       xref = "paper",
+       yref = "paper",
+       xanchor = "left",
+       yanchor = "top",
+       text = paste0(
+         "<b>Nota.</b> Punto = mediana · Intervalo = 50 % central de las respuestas (Q1-Q3).",
+         "\"Depende\" es una respuesta válida y se muestra por separado porque no representa una edad. <br>",
+         "Diseño split ballot en las tres fases; el efecto es de mayor magnitud en adultez."
+       ),
+       showarrow = FALSE, 
+       align = "left",
+       font = list(size = 11, color = "rgb(80, 80, 80)")
+     )
+  ),
+
+  margin = list(
+    l = 120, 
+    r = 35,
+    t = 125,
+    b = 155 
+  ),
+  
+  hoverlabel = list(
+    align = "left"
+  ),
+  plot_bgcolor = "white",
+  paper_bgcolor = "white"
+  ) %>%
+  
+# Configuración del widget 
+  
+  config(
+    responsive = TRUE,
+    displaylogo = FALSE,
+    modeBarButtonsToRemove = c(
+      "select2d",
+      "lasso2d"
+    )
+  )
+
+grafico_violin
+```
+
+
+```{r diferencias-datos, include=FALSE}
+
+# ============================================================
+# DIFERENCIAS - preparación de datos 
+# ============================================================
+
+# Sexo -------------------------------------------------------
+
+bloque2_gndr <- datos_limpios %>%
+  select(gndr, ageadlt, agemage, ageoage) %>%
+  pivot_longer(
+    cols = c(ageadlt, agemage, ageoage),
+    names_to = "fase", 
+    values_to = "edad_percibida"
+  ) %>%
+  filter(
+    !is.na(gndr),
+    !is.na(edad_percibida),
+    edad_percibida > 0
+  ) %>%
+  mutate(
+    sexo = factor(gndr, levels = c(1, 2), labels = c("Hombre", "Mujer")),
+    fase = factor(
+      fase,
+      levels = c("ageadlt", "agemage", "ageoage"),
+      labels = c("Adultez", "Mediana edad", "Vejez")
+    )
+  ) %>%
+  group_by(fase, sexo) %>%
+  summarise(
+    mediana = median(edad_percibida, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  )
+
+# Edad del entrevistado -------------------------------------------------------
+
+bloque2_agea <- datos_limpios %>%
+  select(agea, ageadlt, agemage, ageoage) %>%
+  pivot_longer(
+    cols = c(ageadlt, agemage, ageoage),
+    names_to = "fase", 
+    values_to = "edad_percibida"
+  ) %>%
+  filter(
+    !is.na(agea),
+    !is.na(edad_percibida),
+    edad_percibida > 0
+  ) %>%
+  mutate(
+    fase = recode(
+      fase,
+      ageadlt = "Adultez",
+      agemage = "Mediana edad",
+      ageoage = "Vejez"
+    ),
+    fase = factor(
+      fase,
+      levels = c("Adultez", "Mediana edad", "Vejez"),
+    )
+  ) %>%
+  group_by(fase, agea) %>%
+  summarise(
+    media = mean(edad_percibida, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  )
+
+# País -------------------------------------------------------
+
+correspondencia_paises <- tibble(
+  cntry = c(
+    "AT", "BE", "BG", "CH", "CY", "CZ", "DE", "DK", "EE", "ES",
+    "FI", "FR", "GB", "GR", "HR", "HU", "IE", "IS", "IT", "LT",
+    "LV", "ME", "NL", "NO", "PL", "PT", "RS", "SE", "SI"
+  ),
+  region = c(
+    "Austria", "Belgium", "Bulgaria", "Switzerland", "Cyprus",
+    "Czech Republic", "Germany", "Denmark", "Estonia", "Spain",
+    "Finland", "France", "UK", "Greece", "Croatia", 
+    "Hungary","Ireland", "Iceland", "Italy", "Lithuania", 
+    "Latvia","Montenegro", "Netherlands", "Norway", "Poland", 
+    "Portugal", "Serbia", "Sweden", "Slovenia"
+  )
+)
+
+bloque2_cntry <- datos_limpios %>%
+  select(cntry, ageadlt, agemage, ageoage) %>%
+  pivot_longer(
+    cols = c(ageadlt, agemage, ageoage),
+    names_to = "fase", 
+    values_to = "edad_percibida"
+  ) %>%
+  filter(
+    !is.na(cntry),
+    !is.na(edad_percibida),
+    edad_percibida > 0
+  ) %>%
+  mutate(
+    fase = recode(
+      fase,
+      ageadlt = "Adultez",
+      agemage = "Mediana edad",
+      ageoage = "Vejez"
+    ),
+    fase = factor(
+      fase,
+      levels = c("Adultez", "Mediana edad", "Vejez"),
+    )
+  ) %>%
+  group_by(fase, cntry) %>%
+  summarise(
+    mediana = median(edad_percibida, na.rm = TRUE),
+    n = n(),
+    .groups = "drop"
+  ) %>%
+  left_join(correspondencia_paises, by = "cntry")
+
+mapa_europa <- map_data("world") %>%
+  filter(long >= -25, long <= 45, lat >= 34, lat <= 72)
+
+mapa_bloque2 <- bind_rows(lapply(c("Adultez", "Mediana edad", "Vejez"), function(fase_actual) {
+  mapa_europa %>% mutate(fase = fase_actual)
+})) %>%
+  mutate(fase = factor(fase,levels = c("Adultez", "Mediana edad", "Vejez"))) %>%
+  left_join(
+    bloque2_cntry, 
+    by = c("fase", "region"),
+    relationship = "many-to-one"
+  )
+```
+
+```{r diferencias-graficos, include=FALSE}
+
+# ============================================================
+# DIFERENCIAS - gráficos
+# ============================================================
+
+fases_dashboard <- c("Adultez", "Mediana edad", "Vejez")
+
+  
+crear_lollipop_diferencias <- function(fase_actual) {
+  datos_lollipop <- bloque2_gndr %>%
+    filter(fase == fase_actual) %>%
+    mutate(
+      tooltip = paste0(
+        "Sexo: ", sexo,
+        "<br>Mediana: ", mediana, " años",
+        "<br>n: ", format(n, big.mark = ".", decimal.mark = ",", scientific = FALSE)
+      )
+    )
+
+  lollipop <- suppressWarnings( 
+    ggplot(
+    datos_lollipop,
+    aes(x = mediana, y = sexo)
+  ) +
+    geom_segment(
+      aes(x = 0, xend = mediana, yend = sexo),
+      linewidth = 0.6,
+      colour = "black"
+    ) +
+    geom_point(
+      aes(text = tooltip),
+      size = 3.2,
+      colour = "black"
+    ) +
+    scale_x_continuous(
+      limits = c(0, 100),
+      breaks = seq(0, 100, 10)
+    ) +
+    labs(
+      x = paste0("Edad considerada como inicio de la etapa (años)\n\n",
+                 "Los puntos representan la mediana de la edad considerada<br>para cada sexo."),
+      y = NULL
+    ) +
+    theme_minimal(base_size = 11) + 
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank(),
+      axis.text.y = element_text(size = 10),
+      axis.text.x = element_text(size = 8.5),
+      axis.title.x = element_text(colour = "grey40",size = 10),
+      plot.margin = margin(8, 12, 8, 8)
+    )
+)  
+  ggplotly(
+    lollipop, tooltip = "text", height=240) %>%
+    layout(
+      hovermode = "closest",
+      margin = list(l = 75, r = 20, b = 120, t = 15)
+    ) %>%
+    config(displaylogo = FALSE)
+}
+  
+crear_lineas_edad_diferencias <- function(fase_actual){
+  datos_lineas_agea <- bloque2_agea %>%
+    filter(fase == fase_actual) %>%
+    mutate(tooltip = paste0(
+      "Edad del entrevistado: ", agea, " años",
+      "<br>Media edad percibida: ", round(media, 2), " años",
+      "<br>n :", format(n, big.mark = ".", decimal.mark = ",", scientific = FALSE)
+      )
+    )
+      
+  plot_ly(
+    data = datos_lineas_agea,
+    x = ~agea,
+    y = ~media, 
+    type = "scatter",
+    mode = "lines",
+    text = ~tooltip,
+    hoverinfo = "text",
+    line = list(
+      color = "black",
+      width = 1.5
+    ) 
+  )%>%
+      layout(
+        xaxis = list(
+          title = paste0("Edad del entrevistado (años)\n\n","La línea representa la media observada para cada<br>edad del entrevistado; no se aplica suavizado." ),
+          tickmode = "array",
+          tickvals = seq(20, 90, 10),
+          showgrid = TRUE,
+          gridcolor = "rgb(220, 220, 220)",
+          zeroline = FALSE
+        ),
+        yaxis = list(
+          title = "Inicio percibido de la fase<br>(media, años)",
+          showgrid = FALSE,
+          zeroline = FALSE
+        ),
+        hovermode = "closest",
+        showlegend = FALSE,
+        margin = list(l = 80, r = 20, b = 105, t = 30)
+      ) %>%
+      config(displaylogo = FALSE)
+}
+
+crear_mapa_diferencias <- function(fase_actual) {
+  datos_mapa <- mapa_bloque2 %>%
+    filter(fase == fase_actual) %>%
+    mutate(
+      tooltip = ifelse(
+        is.na(mediana),
+        paste0(region, "<br>sin información ESS9"),
+        paste0(
+          region, 
+          "<br>Mediana: ", mediana, " años",
+          "<br>n: ", format(n, big.mark = ".", decimal.mark = ",", scientific = FALSE)
+        )
+      )
+    )
+  
+  mapa <- ggplot(
+    datos_mapa, 
+    aes(
+      x = long, 
+      y = lat,
+      group = group,
+      fill = mediana,
+      text = tooltip
+    )
+  ) +
+    geom_polygon(colour = "white", linewidth = 0.25) +
+    scale_fill_gradient(
+      low = "#D6E6F0",
+      high = "#285F7D",
+      na.value = "grey94",
+      name = "Mediana (años)"
+    ) +
+    coord_quickmap(
+      xlim = c(-25, 45),
+      ylim = c(34, 72),
+      expand = FALSE
+    ) +
+    theme_void(base_size = 10) +
+    theme(
+      plot.subtitle = element_text(size = 11, margin = margin(b = 8)),
+      legend.position = "right",
+      plot.margin = margin(8, 8, 8, 8)
+    )
+  ggplotly(mapa, tooltip = "text", height=500) %>%
+    layout(
+      xaxis = list(
+        scaleanchor = FALSE
+      ),
+      yaxis = list(
+        scaleanchor = FALSE,
+        domain = c(0.01, 0.90)
+      ),
+      modebar = list(
+        bgcolor = "rgba(255,255,255,0)",
+        color = "rgb(150,150,150)"
+      ),
+      hovermode = "closest",
+      hoverlabel = list(
+        bgcolor = "white",
+        bordercolor = "grey60",
+        font = list(
+          color = "black",
+          size = 12
+        )
+      ),
+      margin = list(l = 10, r = 20, b = 40, t = 35)
+    ) %>%
+    config(displaylogo = FALSE)
+}
+
+grafico_dif_sexo <- setNames(lapply(fases_dashboard, crear_lollipop_diferencias), fases_dashboard)
+grafico_dif_edad <- setNames(lapply(fases_dashboard, crear_lineas_edad_diferencias), fases_dashboard)
+grafico_dif_mapa <- setNames(lapply(fases_dashboard, crear_mapa_diferencias), fases_dashboard)  
+
+```
+
+Diferencias {data-orientation=columns}
+=====================================
+
+Column {.sidebar data-width=180}
+------------------------------------------
+
+<select id="fase_diferencias" style="width:100%; padding:6px;">
+<option value="adultez">Adultez</option>
+<option value="mediana">Mediana edad</option>
+<option value="vejez">Vejez</option>
+</select>
+
+<div style="position:absolute; bottom:20px; left:10px; right:10px; font-size:13px; line-height:1.35;">
+<strong>Nota común.</strong>"Depende" es una respuesta válida que no representa una edad y se excluye de los estadísticos. Diseño <em>Split ballot</em> en las tres fases; el efecto  es de mayor magnitud en adultez.
+</div>
+
+Column {data-width=480}
+------------------------------------------
+
+### Sexo {data-height=320}
+
+<div style="height: calc(100% - 24px);">
+  
+<div style="font-size:16px; padding:3px 10px 0 10px;">
+¿Difiere la edad percibida de inicio según el sexo?
+</div>
+
+<div id="dif-sexo-adultez" class="dif-sexo-fase">
+
+```{r dif-sexo-adultez}
+grafico_dif_sexo[["Adultez"]]
+```
+
+</div>
+<div id="dif-sexo-mediana" class="dif-sexo-fase"
+style="display:none;">
+
+```{r dif-sexo-mediana}
+grafico_dif_sexo[["Mediana edad"]]
+```
+
+</div>
+<div id="dif-sexo-vejez" class="dif-sexo-fase"
+style="display:none;">
+
+```{r dif-sexo-vejez}
+grafico_dif_sexo[["Vejez"]]
+```
+
+</div>
+
+</div>
+
+### Edad del entrevistado {data-height=400}
+
+<div style="height: calc(100% - 30px);">
+
+<div style="font-size:16px; padding:6px 10px 0 10px;">
+¿Cómo cambia la edad percibida de inicio según nuestra propia edad?
+</div>
+
+<div id="dif-edad-adultez" class="dif-edad-fase">
+
+```{r dif-edad-adultez}
+grafico_dif_edad[["Adultez"]]
+```
+
+</div>
+
+<div id="dif-edad-mediana" class="dif-edad-fase"
+style="display:none;">
+
+```{r dif-edad-mediana}
+grafico_dif_edad[["Mediana edad"]]
+```
+
+</div>
+
+<div id="dif-edad-vejez" class="dif-edad-fase"
+style="display:none;">
+
+```{r dif-edad-vejez}
+grafico_dif_edad[["Vejez"]]
+```
+
+</div>
+
+</div>
+
+Column {data-width=520}
+------------------------------------------
+
+### País
+
+<div style="height: calc(100% - 24px);">
+
+<div style="font-size:16px; padding:10px 10px 0 10px;">
+¿Cómo varía territorialmente la edad percibida de inicio?
+</div>
+
+<div id="dif-pais-adultez" class="dif-pais-fase">
+
+```{r dif-pais-adultez}
+grafico_dif_mapa[["Adultez"]]
+```
+
+</div>
+
+<div id="dif-pais-mediana" class="dif-pais-fase"
+style="display:none;">
+
+```{r dif-pais-mediana}
+grafico_dif_mapa[["Mediana edad"]]
+```
+
+</div>
+
+<div id="dif-pais-vejez" class="dif-pais-fase"
+style="display:none;">
+
+```{r dif-pais-vejez}
+grafico_dif_mapa[["Vejez"]]
+```
+
+</div>
+
+</div>
+
+<div style="height:24px; padding-left:10px; font-size:14px;">
+Color = mediana de la edad considerada en cada país.
+</div>
+
+```{r datos-relaciones, include=FALSE}
+
+# ============================================================
+# Relaciones - preparación de datos 
+# Intervalos de 5 años 
+# ============================================================
+
+resumir_relacion <- function(variable_resultado) {
+  preparar_fase <- function(variable_fase, fase_nombre, minimo, maximo) {
+    variable_fase_sym <- rlang::sym(variable_fase)
+    variable_resultado_sym <- rlang::sym(variable_resultado)
+    
+    limites <- c(seq(minimo, maximo, by = 5), maximo + 1)
+    etiquetas <- c(
+      paste0(seq(minimo, maximo - 5, by = 5), "-", seq(minimo + 4, maximo - 1, by = 5)),
+      as.character(maximo)
+    )
+    
+    datos_limpios %>%
+      filter(
+        !is.na(!!variable_fase_sym),
+        !is.na(!!variable_resultado_sym),
+        !!variable_fase_sym >= minimo,
+        !!variable_fase_sym <= maximo
+      ) %>%
+      mutate(
+        intervalo = cut(
+          !!variable_fase_sym,
+          breaks = limites,
+          right = FALSE,
+          labels = etiquetas)
+        ) %>%
+          group_by(intervalo) %>%
+          summarise(
+            media = mean(!!variable_resultado_sym, na.rm = TRUE),
+            n = n(),
+            .groups = "drop"
+          ) %>%
+          mutate(fase = fase_nombre)
+  }
+  
+  bind_rows(
+    preparar_fase("ageadlt", "Adultez", 10, 40),
+    preparar_fase("agemage", "Mediana edad", 15, 70),
+    preparar_fase("ageoage", "Vejez", 40, 90)
+  ) %>%
+    mutate(fase = factor(fase,levels = c("Adultez", "Mediana edad", "Vejez")))
+} 
+
+bloque3_happy <- resumir_relacion("happy")
+bloque3_stflife <- resumir_relacion("stflife")
+bloque3_plnftr <- resumir_relacion("plnftr")
+
+```
+
+```{r relaciones-graficos, include=FALSE}
+crear_relacion <- function(datos, fase_actual, etiqueta_y, titulo_y) {
+  datos_fase <- datos %>%
+    filter(fase == fase_actual) %>%
+    mutate(tooltip = paste0(
+      "Intervalo: ", intervalo, " años",
+      "<br>", etiqueta_y, ": ", round(media, 2),
+      "<br>n :", format(n, big.mark = ".", decimal.mark = ",", scientific = FALSE)
+      )
+    )
+  
+  p <- ggplot( 
+    datos_fase,
+     aes(
+      x = intervalo,
+      y = media, 
+      group = 1,
+      text = tooltip
+    )
+  ) +
+    geom_line(linewidth = 0.7, colour = "black") +
+    geom_point(size = 2, colour = "black") +
+    scale_y_continuous(
+      limits = c(0, 10),
+      breaks = seq(0, 10, 2)
+    ) +
+    labs(
+      x = "Edad considerada como incio de la etapa (años)",
+      y = titulo_y 
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+      panel.grid.minor = element_blank(),
+      axis.text.x = element_text(
+        angle = 90, 
+        hjust = 1, 
+        vjust = 0.5,
+        size = 8
+      ),
+      axis.title.x = element_text(size = 10, margin = margin(t = 8)),
+      axis.title.y = element_text(size = 10),
+      plot.margin = margin(5, 10, 5, 10) 
+    )
+    
+  ggplotly(p, tooltip = "text", height=220) %>%
+  layout(
+    hovermode = "closest",
+    xaxis = list(
+      automargin = TRUE
+    ),
+    margin = list(l = 80, r = 20, b = 50, t = 10)
+      ) %>%
+    config(displaylogo = FALSE)
+}
+  
+grafico_rel_felicidad <- setNames(
+  lapply(fases_dashboard, function(f) crear_relacion(
+    bloque3_happy, f, "Felicidad media", "Felicidad media"
+  )), fases_dashboard
+)
+
+grafico_rel_satisfaccion <- setNames(
+  lapply(fases_dashboard, function(f) crear_relacion(
+    bloque3_stflife, f, "Satisfacción media", "Satisfacción media \ncon la vida"
+  )), fases_dashboard
+)
+
+grafico_rel_planificacion <- setNames(
+  lapply(fases_dashboard, function(f) crear_relacion(
+    bloque3_plnftr, f, "Planificación media", "Planificación media"
+  )), fases_dashboard
+)
+
+```
+
+Relaciones {data-orientation=columns}
+=====================================
+
+Column {.sidebar data-width=180}
+------------------------------------------
+
+<select id="fase_relaciones" style="width:100%; padding:6px;">
+<option value="adultez">Adultez</option>
+<option value="mediana">Mediana edad</option>
+<option value="vejez">Vejez</option>
+</select>
+
+<div style="position:absolute; bottom:20px; left:10px; right:10px; font-size:13px; line-height:1.35;">
+<strong>Nota común.</strong>"Depende" es una respuesta válida que no representa una edad y se excluye de los estadísticos. Diseño <em>Split ballot</em> en las tres fases; el efecto es de mayor magnitud en adultez. La línea conecta las medias observadas por intervalo de edad percibida.
+</div>
+
+Column {data-width=820 .scrollable .relaciones-col}
+------------------------------------------
+
+```{css}
+.relaciones-col .chart-wrapper {
+height: 260px !important;
+min-height: 260px !important;
+flex: 0 0 260px !important;
+}
+```
+
+### Felicidad {data-height=220}
+
+<div id="rel-felicidad-adultez" class="rel-felicidad-fase">
+
+```{r rel-felicidad-adultez}
+grafico_rel_felicidad[["Adultez"]]
+```
+
+</div>
+
+<div id="rel-felicidad-mediana" class="rel-felicidad-fase"
+style="display:none;">
+
+```{r rel-felicidad-mediana}
+grafico_rel_felicidad[["Mediana edad"]]
+```
+
+</div>
+
+<div id="rel-felicidad-vejez" class="rel-felicidad-fase"
+style="display:none;">
+
+```{r rel-felicidad-vejez}
+grafico_rel_felicidad[["Vejez"]]
+```
+
+</div>
+
+### Satisfacción con la vida {data-height=220}
+
+<div id="rel-satisfaccion-adultez" class="rel-satisfaccion-fase">
+
+```{r rel-satisfaccion-adultez}
+grafico_rel_satisfaccion[["Adultez"]]
+```
+
+</div>
+
+<div id="rel-satisfaccion-mediana" class="rel-satisfaccion-fase"
+style="display:none;">
+
+```{r rel-satisfaccion-mediana}
+grafico_rel_satisfaccion[["Mediana edad"]]
+```
+
+</div>
+
+<div id="rel-satisfaccion-vejez" class="rel-satisfaccion-fase"
+style="display:none;">
+
+```{r rel-satisfaccion-vejez}
+grafico_rel_satisfaccion[["Vejez"]]
+```
+
+</div>
+
+### Planificación del futuro {data-height=220}
+
+<div id="rel-planificacion-adultez" class="rel-planificacion-fase">
+
+```{r rel-planificacion-adultez}
+grafico_rel_planificacion[["Adultez"]]
+```
+
+</div>
+
+<div id="rel-planificacion-mediana" class="rel-planificacion-fase"
+style="display:none;">
+
+```{r rel-planificacion-mediana}
+grafico_rel_planificacion[["Mediana edad"]]
+```
+
+</div>
+
+<div id="rel-planificacion-vejez" class="rel-planificacion-fase"
+style="display:none;">
+
+```{r rel-planificacion-vejez}
+grafico_rel_planificacion[["Vejez"]]
+```
+
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+  function activarSelector(selectorId, prefijos) {
+     var selector = document.getElementById(selectorId);
+     if (!selector) return;
+     var fases = ["adultez", "mediana", "vejez"];
+
+  function mostrar() {
+    prefijos.forEach(function(prefijo) {
+       fases.forEach(function(fase) {
+          var el = document.getElementById(prefijo + "-" + fase);
+          if (el) el.style.display = (fase === selector.value) ?
+          "block" : "none"; 
+       });
+     });
+  
+     setTimeout(function() {
+       prefijos.forEach(function(prefijo) {
+         var visible = document.getElementById(prefijo + "-" + selector.value);
+      if (! visible || typeof Plotly === "undefined") return;
+      visible.querySelectorAll(".plotly").forEach(function(p) {
+         try { Plotly.Plots.resize(p); } catch(e) {}
+       });
+     });  
+   }, 100);
+  }
+
+  selector.addEventListener("change", mostrar);
+  mostrar();
+ }
+ activarSelector(
+ "fase_diferencias",
+ ["dif-sexo", "dif-edad", "dif-pais"]
+ );
+ 
+ activarSelector(
+ "fase_relaciones",
+ ["rel-felicidad", "rel-satisfaccion", "rel-planificacion"]
+ );
+});
+</script> 
+
+```{r datos-tablas, include=FALSE}
+
+fases <- c(
+  ageadlt = "Adultez",
+  agemage = "Mediana edad",
+  ageoage = "Vejez"
+)
+
+# 0 = "Depende": respuesta válida, pero no es una edad
+edad_valida <- function(x) {
+  x[!is.na(x) & x != 0]
+}
+
+fmt_num <- function(x, digits = 2) {
+  formatC(x, format = "f", digits = digits, decimal.mark = ",")
+}
+
+fmt_rho <- function(x) {
+  fmt_num(x, 2)
+}
+
+interpretar_rho <- function(r) {
+  a <- abs(r)
+  if (a < .10) "prácticamente nula"
+  else if (a < .30) "asociación débil"
+  else if (a < .50) "asociación moderada"
+  else "asociación fuerte"
+}
+
+```
+
+```{css, echo=FALSE}
+.tabla-dashboard table {
+width: 100% !important;
+table-layout: fixed;
+margin-bottom: 0;
+}
+
+.tabla-dashboard th,
+.tabla-dashboard td {
+padding: 7px 10px !important;
+vertical-align: middle !important;
+font-size: 13px;
+border-bottom: 1px solid #dddddd !important;
+}
+
+.tabla-dashboard caption {
+text-align: left;
+padding: 7px 10px;
+font-size: 13px;
+color: #777;
+}
+
+.tabla-distribucion th:nth-child(1),
+.tabla-distribucion td:nth-child(1) {width: 28%; }
+
+.tabla-distribucion th:nth-child(2),
+.tabla-distribucion td:nth-child(2) {width: 24%; text-align: center; }
+
+.tabla-distribucion th:nth-child(3),
+.tabla-distribucion td:nth-child(3) {width: 24%; text-align: center; }
+
+.tabla-distribucion th:nth-child(4),
+.tabla-distribucion td:nth-child(4) {width: 24%; text-align: center; }
+
+.tabla-split th:nth-child(1),
+.tabla-split td:nth-child(1) {width: 28%; }
+
+.tabla-split th:nth-child(2),
+.tabla-split td:nth-child(2) {width: 24%; text-align: center; }
+
+.tabla-split th:nth-child(3),
+.tabla-split td:nth-child(3) {width: 20%; text-align: center; }
+
+.tabla-split th:nth-child(4),
+.tabla-split td:nth-child(4) {width: 28%; text-align: center; }
+
+.tabla-relaciones th:nth-child(1),
+.tabla-relaciones td:nth-child(1) {width: 29%; }
+
+.tabla-relaciones th:nth-child(2),
+.tabla-relaciones td:nth-child(2) {width: 15%; }
+
+.tabla-relaciones th:nth-child(3),
+.tabla-relaciones td:nth-child(3) {width: 56%; }
+```
+
+Tablas
+=====================================
+
+Row {data-height=220}
+-------------------------------------
+
+### Distribución de las fases 
+
+```{r tabla-distribucion, results='asis'}
+
+tabla_distribucion <- bind_rows(
+  lapply(names(fases), function(v) {
+    x <- datos_limpios[[v]]
+    x_edad <- edad_valida(x)
+    
+    q <- quantile(
+      x_edad,
+      probs = c(.25, .75),
+      na.rm = TRUE,
+      names = FALSE
+    )
+    
+    tibble(
+      Fase = unname(fases[v]),
+      `Mediana (años)` = median(x_edad, na.rm = TRUE),
+      `Q1-Q3 (años)` = paste0(q[1], "-", q[2]),
+      `Depende (%)` = fmt_num(mean(x == 0, na.rm = TRUE) * 100, 1)
+    )
+  })
+)
+
+cat('<div class="tabla-dashboard tabla-distribucion">')
+print(
+  kable(
+    tabla_distribucion, 
+    format = "html",
+    escape = FALSE,
+    row.names = FALSE,
+    align = c("l", "c", "c", "c"),
+    caption = "Distribución de las edades percibidas de inicio de cada fase"
+  )
+)
+cat('</div>')
+```
+
+### Split ballot 
+
+```{r tabla-split, results='asis'}
+
+tabla_split <- bind_rows(
+  lapply(names(fases), function(v) {
+    
+    d <- datos_limpios %>%
+      transmute(admge = admge, valor = .data[[v]]) %>%
+      filter(
+        !is.na(admge),
+        admge %in% c(1, 2),
+        !is.na(valor),
+        valor != 0
+      )
+    
+    test <- wilcox.test(
+      valor ~ admge,
+      data = d,
+      exact = FALSE, 
+      correct = TRUE
+    )
+    
+    n1 <- sum(d$admge == 1)
+    n2 <- sum(d$admge == 2)
+    N <- n1 + n2
+    W <- unname(test$statistic)
+    mu_W <- n1 * n2 / 2
+    
+    
+    frec_empates <- table(d$valor)
+    tie_term <- sum(frec_empates^3 - frec_empates)
+    
+    sigma_W <- sqrt(
+      (n1 * n2 / 12) *
+        ((N + 1) - tie_term / (N * (N - 1))) 
+    )
+    
+    z <- (W -  mu_W) / sigma_W
+    r <- abs(z) / sqrt(N)
+    
+    tibble(
+      Fase = unname(fases[v]),
+      W = format(
+        round(W, 0),
+        big.mark = ".",
+        decimal.mark = ",",
+        scientific = FALSE
+      ),
+      p = if (test$p.value < .001) {
+        "< 0,001"
+      } else {
+        fmt_num(test$p.value, 3)
+      }, 
+      `Tamaño del efecto (r)` = fmt_num(r, 3)
+    )
+  })
+)
+
+cat('<div class="tabla-dashboard tabla-split">')
+print(
+  kable(
+    tabla_split, 
+    format = "html",
+    escape = FALSE,
+    row.names = FALSE,
+    caption = "Split ballot (admge): contraste y tamaño del efecto"
+  )
+)
+cat('</div>')
+
+```
+
+Row {data-height=360}
+-------------------------------------
+
+### Relaciones principales 
+
+```{r tabla-relaciones, results='asis'}
+
+fase_sin_depende <- function(x) {
+  x[x == 0] <- NA
+  x
+}
+
+rho_adlt_mage <- cor(
+  fase_sin_depende(datos_limpios$ageadlt),
+  fase_sin_depende(datos_limpios$agemage),
+  method = "spearman", use = "pairwise.complete.obs"
+)
+
+rho_adlt_oage <- cor(
+  fase_sin_depende(datos_limpios$ageadlt),
+  fase_sin_depende(datos_limpios$ageoage),
+  method = "spearman", use = "pairwise.complete.obs"
+)
+
+rho_mage_oage <- cor(
+  fase_sin_depende(datos_limpios$agemage),
+  fase_sin_depende(datos_limpios$ageoage),
+  method = "spearman", use = "pairwise.complete.obs"
+)
+
+# Edad del entrevistado y fases
+
+rho_agea <- sapply(names(fases), function(v) {
+  cor(
+    datos_limpios$agea,
+    fase_sin_depende(datos_limpios[[v]]),
+    method = "spearman", use = "pairwise.complete.obs"
+  )
+})
+
+# Sexo y fases
+
+p_gndr <- sapply(names(fases), function(v){
+  d <- datos_limpios %>%
+    transmute(
+      gndr = gndr,
+      fase = fase_sin_depende(.data[[v]])
+    ) %>%
+    filter(!is.na(gndr), !is.na(fase))
+  
+  wilcox.test(fase~gndr, data = d, exact = FALSE)$p.value
+})
+
+# País y fases
+
+p_cntry <- sapply(names(fases), function(v){
+  d <- datos_limpios %>%
+    transmute(
+      cntry = cntry,
+      fase = fase_sin_depende(.data[[v]])
+    ) %>%
+    filter(!is.na(cntry), !is.na(fase))
+  
+  kruskal.test(fase~cntry, data = d)$p.value
+})
+
+# Fases con planificación y bienestar
+
+rho_fases_exp <- unlist(
+  lapply(names(fases), function(f) {
+    sapply(c("plnftr", "happy", "stflife"), function(v){ 
+      cor(
+        fase_sin_depende(datos_limpios[[f]]),
+        datos_limpios[[v]],
+        method = "spearman", use = "pairwise.complete.obs"
+      )
+      })
+  })
+)
+
+rho_fases_exp_max <- max(
+  abs(rho_fases_exp),
+  na.rm = TRUE
+)
+
+# Resultados resumidos de los contrastes 
+
+resultado_gndr <- if(all(p_gndr < .001, na.rm = TRUE)) {
+  "p < 0,001 en las tres fases"
+} else {
+  paste0(
+    "p entre ",
+    fmt_num(min(p_gndr, na.rm = TRUE), 3),
+    " y ",
+    fmt_num(max(p_gndr, na.rm = TRUE), 3)
+  )
+}
+
+resultado_cntry <- if(all(p_cntry < .001, na.rm = TRUE)) {
+  "p < 0,001 en las tres fases"
+} else {
+  paste0(
+    "p entre ",
+    fmt_num(min(p_cntry, na.rm = TRUE), 3),
+    " y ",
+    fmt_num(max(p_cntry, na.rm = TRUE), 3)
+  )
+}
+
+# Tabla síntesis 
+
+tabla_relaciones <- data.frame(
+  Variables = c(
+    "ageadlt -- agemage",
+    "ageadlt -- ageoage",
+    "agemage -- ageoage",
+    "gndr -- fases",
+    "agea -- ageadlt",
+    "agea -- agemage",
+    "agea -- ageoage",
+    "cntry -- fases",
+    "fases -- plnftr / happy / stflife"
+  ),
+  
+  Analisis = c(
+    "Spearman",
+    "Spearman",
+    "Spearman",
+    "Wilcoxon",
+    "Spearman",
+    "Spearman",
+    "Spearman",
+    "Kruskal-Wallis",
+    "Spearman"
+  ),
+  
+  Resultado = c(
+    paste0("ρ = ", fmt_rho(rho_adlt_mage),"; ", interpretar_rho(rho_adlt_mage)),
+    paste0("ρ = ", fmt_rho(rho_adlt_oage),"; ", interpretar_rho(rho_adlt_oage)),
+    paste0("ρ = ", fmt_rho(rho_mage_oage),"; ", interpretar_rho(rho_mage_oage)),
+    resultado_gndr,
+    
+    paste0("ρ = ", fmt_rho(rho_agea["ageadlt"]),"; ", interpretar_rho(rho_agea["ageadlt"])),
+    paste0("ρ = ", fmt_rho(rho_agea["agemage"]), "; ", interpretar_rho(rho_agea["agemage"])),
+    paste0("ρ = ", fmt_rho(rho_agea["ageoage"]), "; ", interpretar_rho(rho_agea["ageoage"])),
+    
+    resultado_cntry,
+    
+    paste0(
+      "|ρ| <=",
+      fmt_rho(rho_fases_exp_max),
+      "; asociación ",
+      interpretar_rho(rho_fases_exp_max)
+    )
+  ),
+  
+  check.names = FALSE
+)
+
+# Salida de la tabla 
+
+cat('<div class="tabla-dashboard tabla-relaciones">')
+
+print(
+  kable(
+    tabla_relaciones,
+    format = "html",
+    escape = FALSE,
+    row.names = FALSE,
+    caption = "Síntesis de las principales relaciones exploradas"
+    )
+  )
+cat('</div>')
+```
+
+```{css, echo = FALSE}
+
+/* Títulos internos */
+.about-subtitle {
+font-size: 17px;
+font-weight: 600;
+margin-top: 4px;
+margin-bottom: 8px;
+}
+
+/* Separación entre bloques dentro de un mismo panel */
+.about-block {
+margin-bottom: 16px;
+}
+
+/* Ficha técnica*/
+.data-grid {
+display: grid;
+grid-template-columns: repeat(3, 1fr); 
+column-gap: 24px;
+row-gap: 7px;
+margin-top: 12px;
+margin-bottom: 14px;
+}
+
+.data-item {
+border-bottom: 1px solid #dddddd;
+padding-bottom: 4px;
+}
+
+/* Variables */
+.variables-grid {
+display: grid;
+grid-template-columns: 1fr 1fr;
+column-gap: 32px;
+row-gap: 5px;
+}
+
+.variable-item {
+margin-bottom: 5 px;
+}
+
+/* Separador discreto */
+.about-separator {
+border-top: 1px solid #dddddd;
+margin: 14px 0;
+}
+
+/* Listas */
+.about-list {
+margin-top: 6px;
+margin-bottom: 8px;
+padding-left: 22px;
+}
+
+.about-list li {
+margin-bottom: 5px;
+}
+
+/* Fuentes */
+.sources {
+margin-top: 8px;
+}
+```
+
+Acerca de
+=====================================
+
+Row {data-height=340}
+-------------------------------------
+
+### Sobre el estudio y el dashboard
+
+<div class="about-block">
+
+La visualización utiliza datos de la **European Social Survey, Round 9 (ESS9)**, una encuesta social comparada de carácter transversal. El análisis se centra en el módulo *Timing of Life*, dedicado a las percepciones y normas sociales sobre el curso vital. 
+
+<div class="data-grid">
+
+<div class="data-item">**Ronda:** ESS9</div>
+<div class="data-item">**Recogida:** 2018/2019</div>
+<div class="data-item">**Participantes:** 49.519</div>
+
+<div class="data-item">**Cobertura:** 29 países</div>
+<div class="data-item">**Módulo:** *Timing of Life*</div>
+<div class="data-item">**Diseño:** encuesta transversal</div>
+
+</div>
+
+</div>
+
+<div class="about-block">
+
+<div class="about-subtitle">Qué explora el dashboard</div>
+
+El objetivo es **analizar cómo se percibe el inicio de la adultez, la mediana edad y la vejez** en la población europea estudiada en ESS9. El dashboard permite examinar el grado de consenso sobre estas edades, sus diferencias según **edad, sexo y país**, y su relación con la **planificación del futuro, la felicidad y la satisfacción con la vida**.
+
+</div>
+
+<div class="about-block">
+
+<div class="about-subtitle">Interés y uso</div>
+
+El dashboard está pensado para facilitar la exploración de **patrones sociales, diferencias entre grupos y variación entre países** en las percepciones sobre las etapas de la vida. Puede resultar especialmente útil para personas interesadas en el curso vital, las diferencias sociodemográficas y su relación con dimensiones de bienestar y planificación personal. 
+
+</div>
+
+Row {data-height=410}
+--------------------------------------------------
+
+### Variables y consideraciones para la interpretación
+
+<div class="about-subtitle">Variables</div>
+
+<div class="variables-grid">
+
+<div class="variable-item">**ageadlt** -- Edad percibida de inicio de la adultez.</div>
+
+<div class="variable-item">**agemage** -- Edad percibida de inicio de la mediana edad.</div>
+
+<div class="variable-item">**ageoage** -- Edad percibida de inicio de la vejez.</div>
+
+<div class="variable-item">**gndr** -- Sexo de la persona entrevistada.</div>
+
+<div class="variable-item">**agea** -- Edad calculada de la persona entrevistada.</div>
+
+<div class="variable-item">**cntry** -- País.</div>
+
+<div class="variable-item">**happy** -- Grado de felicidad considerando todas las cosas en conjunto (0 = extremadamente infeliz; 10 = extremadamente feliz).</div>
+
+<div class="variable-item">**stflife** -- Satisfacción con la vida en su conjunto (0 = extremadamente insatisfecho; 10 = extremadamente satisfecho).</div>
+
+<div class="variable-item">**plnftr** -- Planificación del futuro frente a vivir el día a día (0 = planifica el futuro tanto como sea posible; 10 = vive cada día según viene).</div>
+
+<div class="variable-item">**admge** -- Variable de administración del *split ballot*: asignación aleatoria a la versión referida a mujeres o a hombres.</div>
+
+</div>
+
+<div class="about-separator"></div>
+
+<div class="about-subtitle">Vigencia y actualización</div>
+
+Los datos corresponden a **ESS9 (2018/2019)** y son, por tanto, anteriores a la pandemia de COVID-19. *Timing of Life* es un **módulo rotatorio**, por lo que su periodicidad no coincide necesariamente con la periodicidad general de las rondas de la ESS. Esta circunstancia debe tenerse en cuenta al interpretar los resultados como reflejo de las percepciones actuales.
+
+<div class="about-separator"></div>
+
+<div class="about-subtitle">Consideraciones para la interpretación</div>
+
+<ul class="about-list">
+<li>El diseño es <strong>transversal</strong>: las asociaciones observadas no permiten establecer relaciones causales.</li>
+
+<li>Los <strong>tamaños muestrales difieren entre países</strong>, por lo que las comparaciones deben interpretarse atendiendo también al número de observaciones.</li>
+
+<li>Las preguntas sobre las fases vitales se administraron mediante <strong>split ballot</strong>. Este aspecto es especialmente relevante en la interpretación de la adultez.</li>
+
+<li>El valor <strong>0 = "Depende"</strong> constituye una respuesta válida en las variables de las fases vitales y se trata separadamente de las edades numéricas  </li>
+
+</ul>
+
+Row {data-height=80}
+------------------------------------------------
+
+### Fuentes y documentación 
+
+<div class="about-block sources">
+
+
+[Datos de ESS9](https://doi.org/10.21338/ess9e03_3)
+[Documentación](https://www.europeansocialsurvey.org/sites/default/files/2023-06/TL11_Timing_of_Life-English.pdf)
+
+</div>
+
